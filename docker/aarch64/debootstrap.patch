@@ -1,0 +1,12 @@
+diff -urdN 1/debootstrap/debootstrap 2/debootstrap/debootstrap
+--- 1/debootstrap/debootstrap	2021-04-12 10:58:27.329661805 +0100
++++ 2/debootstrap/debootstrap	2021-04-12 11:04:15.312059115 +0100
+@@ -51,6 +51,8 @@
+ 
+ export LANG USE_COMPONENTS
+ umask 022
++export PYTHONHOME=/usr/lib/python3.8/
++export PYTHONPATH=/usr/lib/python3.8:
+ 
+ ###########################################################################
+ 

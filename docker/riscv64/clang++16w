@@ -1,0 +1,4 @@
+#!/bin/bash
+
+/usr/bin/clang++ $*  --sysroot /workdir/crosschroot/ # -I /usr/lib/clang/16/include/
+

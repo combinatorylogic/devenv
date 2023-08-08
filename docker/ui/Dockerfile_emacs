@@ -1,0 +1,32 @@
+#################################################################
+# NOTE: before building this dockerfile, do the following:
+#
+# echo 0 | sudo tee /proc/sys/kernel/randomize_va_space
+#
+#################################################################
+ARG baseversion=1.0.0
+ARG baseimage=base_devenv
+FROM ${baseimage}:${baseversion}
+
+# Emacs dependencies
+RUN apt-get update && apt-get -y install gnutls-bin libgnutls28-dev libtiff-dev libx11-dev xaw3dg-dev libxaw7-dev libgif-dev librsvg2-dev \
+    libpng-dev libjpeg-dev libjpeg9 autoconf flex bison texi2html texinfo && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+
+ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/lib"
+# Build and install emacs
+RUN cd /root && git clone https://github.com/tree-sitter/tree-sitter.git && \
+   cd /root/tree-sitter && make -j20 && make -j20 install && \
+   cd /root && wget --quiet https://ftpmirror.gnu.org/emacs/emacs-29.1.tar.gz && tar -xf emacs-29.1.tar.gz \
+   && cd /root/emacs-29.1 \
+   && ./configure --prefix=/usr/local --without-makeinfo --with-tree-sitter \
+   && make -j8 bootstrap \
+   && make -j8 install && cd /root && rm -rf /root/emacs-29.1
+
+# Install Emacs dotfiles, populate elpa
+COPY dotemacs/.emacs /root/.emacs
+COPY dotemacs/install.el /root/install.el
+
+RUN emacs --batch -l /root/.emacs && emacs --batch -l /root/.emacs -l /root/install.el
+
+

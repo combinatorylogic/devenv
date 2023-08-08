@@ -1,0 +1,90 @@
+* Development environment
+
+This repository contains everything needed to produce development Docker images for fast
+cross-compilation for aarch64 and riscv64 Ubuntu20.04 targets, as well as the common x86_64 development
+environment. Can also be used to produce Ubuntu20.04 root filesystems for native deployment.
+
+Cross-compilation is done in qemu-based chroot environments with =mostly= native target binaries, with compiler,
+linker, ar, ranlib, etc. still being host native binaries. This way of compiling for the target platforms is seamless,
+but does not suffer from the poor qemu performance.
+
+For convenience, common development environment (emacs and vscode based) is also built into Docker images, allowing
+to set up a new developer workstation in minutes and ensuring that everyone have exactly the same environment.
+
+An additional set of Docker images is provided for simplifying FPGA development (both with Xilinx toolchains and
+open source flow).
+
+** Base layer
+
+Contains clang-16.0.6, patched for some known issues affecting cross-compilation and clang-tidy crashes, and
+a few essentials.
+
+** Convenience layers
+
+Built in top of base layer, optionally some other layers. The =devenv_code= allows to use Visual Studio Code from inside the Docker image,
+pre-configured for C++ development with clangd. The =devenv_emacs= contains emacs-21.9 built with tree-sitter,
+also pre-configured for C++ development with clangd.
+
+Convenience layers can also be built on top of any other base image (e.g., =devenv_fpgaext=), to make a
+customised interactive development environment.
+
+** =run.sh=
+
+A script =docker/run.sh -i imagename= allows to run the provided Docker images interactively, with properly set up X11
+authentication. It will mount a =./workdir= directory as =/workdir= in the container. Cross-compilation images will
+use this =/workdir= to persist the changes to the root fs as well.
+
+See =./run.sh -?= for more options.
+
+
+** Cross-compilation layers
+
+These images contain a qemu chroot filesystem for a target platform (aarch64 and riscv64), configured to persist the
+changes to the root fs in =/workdir= using an overlay fs.
+
+To use those images, make sure that the host have properly configured binfmt translation. Qemu binaries are inside
+the chroot filesystems in the docker images, but translation path is configured by the =binfmt= module of the host
+kernel. Binaries are expected at =/usr/bin/qemu-aarch64-static= and =/usr/bin/qemu-riscv64-static=. You don't need
+qemu binaries to be present on the host system, only translation is required.
+
+A quick way to configure is to load =binfmt= module and then do the following:
+
+#+begin_src
+echo ':qemu-aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:'| sudo tee /tmp/install/binfmt_misc/register
+echo ':qemu-riscv64:M::\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xf3\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-riscv64-static:'| sudo tee /tmp/install/binfmt_misc/register
+#+end_src
+
+In Ubuntu and Debian-based hosts it's sufficient to install =binfmt-support= and =qemu-user-static= packages.
+
+*** Using cross-compilation layers
+
+Images are pre-configured, with environment variables set as follows:
+
+#+begin_src
+export CC="/opt/host/bin/clang"
+export CXX="/opt/host/bin/clang++ -fuse-ld=/opt/host/bin/ld.lld -L/usr/lib -Qunused-arguments"
+export LD="/opt/host/bin/ld.lld"
+export LD_LIBRARY_PATH=/opt/host/lib:\$LD_LIBRARY_PATH
+export PATH=/opt/host/bin:\$PATH
+#+end_src
+
+Make sure you're using the right compiler (e.g., in your specific toolchain files, in qmake-based builds, etc.),
+because toolchains from =/usr/bin/...= will be simulated by qemu and therefore painfully slow.
+
+** FPGA development images
+
+They are configured to allow using Xilinx tools (mounted externally), starting with 2023.x versions that are compatible with
+Ubuntu 20.04LTS, and contain the open-source flow, including icestorm, yosys, trellis, nextpnr (built for ice40 and ecp5),
+arachne pnr, icarus, verilator. Verification tools inluded: z3, boolector, super_prove, SymbiYosys.
+
+Also contains a bare metal riscv64 and riscv32 toolchain, LiteX, CoQ, Scala for Chisel, hardcaml.
+
+** Image sizes
+
+
+| Layer | Size (GB) | Notes         |
+|-------+-----------+---------------|
+| base  |      7.32 |               |
+| emacs |      7.64 | includes base |
+| code  |      8.18 | includes base |
+| arm   |      6.08 |               |

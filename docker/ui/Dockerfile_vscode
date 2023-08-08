@@ -1,0 +1,26 @@
+ARG baseversion=1.0.0
+ARG baseimage=base_devenv
+FROM ${baseimage}:${baseversion}
+
+# Emacs dependencies
+RUN apt-get update && apt-get -y install gnutls-bin libgnutls28-dev libtiff-dev libx11-dev xaw3dg-dev libxaw7-dev libgif-dev xdg-utils \
+    libpng-dev libjpeg-dev libjpeg9 autoconf flex bison \
+    texi2html texinfo libxkbfile1 libsecret-common libsecret-1-0 \
+    curl libcanberra-gtk-module libcanberra-gtk3-module dbus-x11 \
+    dbus gnome-terminal dbus-tests && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN cd /root && wget https://update.code.visualstudio.com/1.80.2/linux-deb-x64/stable -O code.deb && \
+    dpkg -i /root/code.deb && rm -f /root/code.deb
+
+RUN /usr/share/code/bin/code --install-extension llvm-vs-code-extensions.vscode-clangd --user-data-dir=/root
+RUN /usr/share/code/bin/code --install-extension ms-vscode.cmake-tools --user-data-dir=/root
+RUN /usr/share/code/bin/code --install-extension ms-python.python --user-data-dir=/root
+
+COPY initcode.sh /root/.bashrc
+
+
+# Run code as follows:
+# 
+# mkdir -p /var/run/dbus
+# dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address
+# code --disable-gpu --in-process-gpu --no-sandbox --user-data-dir /root/tmp

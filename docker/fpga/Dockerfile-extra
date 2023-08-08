@@ -1,0 +1,49 @@
+ARG baseversion=1.0.0
+ARG baseimage=base_devenv
+FROM ${baseimage}_fpgaenv:${baseversion}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y scala ngspice easyspice tclspice gwave gspiceui texlive-latex-extra texlive-pstricks texlive-science texlive-formats-extra \
+    racket guile-2.0 octave axiom gforth leiningen clojure haskell-platform cernlib paw++ paw-demos \
+    libevent-dev  libtool automake pkg-config libusb-1.0-0-dev device-tree-compiler \
+    --assume-yes \
+    && add-apt-repository --yes ppa:freecad-maintainers/freecad-stable \
+    && add-apt-repository --yes ppa:freecad-maintainers/freecad-daily \
+    && add-apt-repository --yes ppa:kicad/kicad-dev-nightly \
+    && apt-get update \
+    && apt-get install -y freecad kicad-nightly freecad-daily freecad-daily-python3 povray --install-recommends \
+    &&  rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update \
+    && apt-get install -y bubblewrap libzmq3-dev libcairo2-dev &&  rm -rf /var/lib/apt/lists/*
+RUN cd /root && wget https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh && (echo "/usr/bin/" | bash /root/install.sh --fresh)
+RUN rm -rf $HOME/.opam && opam init -a -y --bare --disable-sandboxing && eval "$(opam config env)" ; opam switch create 4.07.1 ; opam update -y ; opam upgrade -y
+RUN eval "$(opam config env)" \
+ && opam install -y coq \
+ && opam install -y jupyter \
+ && opam install -y jupyter-archimedes \
+ && opam install -y hardcaml
+RUN eval "$(opam config env)" && ocaml-jupyter-opam-genspec \
+ && jupyter kernelspec install --name ocaml-jupyter "$(opam config var share)/jupyter"
+
+RUN tail -n 2 /root/.profile >> /root/.bashrc
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --target riscv32imac-unknown-none-elf --profile complete -y
+
+RUN tail -n 1 /root/.profile >> /root/.bashrc
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN rustup target add riscv32imac-unknown-none-elf
+
+#RUN echo "deb https://dl.bintray.com/sbt/debian /" | sudo tee -a /etc/apt/sources.list.d/sbt.list
+#RUN curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | apt-key add
+#RUN sudo apt-get update && apt-get install -y sbt && rm -rf /var/lib/apt/lists/*
+
+## Get some scala and rust stuff pre-cached, and test sanity of the whole installation:
+#RUN cd /root; git clone https://github.com/craigjb/riscv-blinky.git && cd /root/riscv-blinky \
+#    && cd /root/riscv-blinky/firmware && rustup target add riscv32imac-unknown-none-elf && cargo build --release \
+#    && riscv64-unknown-elf-objcopy -O binary target/riscv32imac-unknown-none-elf/release/blinky target/riscv32imac-unknown-none-elf/release/blinky.bin \
+#    && cd /root/riscv-blinky && make

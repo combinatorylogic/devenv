@@ -1,0 +1,213 @@
+diff --git a/clang/lib/AST/ASTContext.cpp b/clang/lib/AST/ASTContext.cpp
+index 8054eb2e1..9cd07ec7a 100644
+--- a/clang/lib/AST/ASTContext.cpp
++++ b/clang/lib/AST/ASTContext.cpp
+@@ -2361,7 +2361,9 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
+     const auto *A = cast<DeducedType>(T);
+     assert(!A->getDeducedType().isNull() &&
+            "cannot request the size of an undeduced or dependent auto type");
+-    return getTypeInfo(A->getDeducedType().getTypePtr());
++    if (A->getDeducedType().isNull()) break;
++    else
++      return getTypeInfo(A->getDeducedType().getTypePtr());
+   }
+ 
+   case Type::Paren:
+diff --git a/clang/lib/DirectoryWatcher/linux/DirectoryWatcher-linux.cpp b/clang/lib/DirectoryWatcher/linux/DirectoryWatcher-linux.cpp
+index 9b3d2571f..266b67347 100644
+--- a/clang/lib/DirectoryWatcher/linux/DirectoryWatcher-linux.cpp
++++ b/clang/lib/DirectoryWatcher/linux/DirectoryWatcher-linux.cpp
+@@ -29,6 +29,7 @@
+ #include <sys/epoll.h>
+ #include <sys/inotify.h>
+ #include <unistd.h>
++#include <linux/limits.h>
+ 
+ namespace {
+ 
+diff --git a/clang/lib/Driver/ToolChains/Gnu.cpp b/clang/lib/Driver/ToolChains/Gnu.cpp
+index 4f2340316..0fee34168 100644
+--- a/clang/lib/Driver/ToolChains/Gnu.cpp
++++ b/clang/lib/Driver/ToolChains/Gnu.cpp
+@@ -3086,9 +3086,13 @@ Generic_GCC::addLibCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
+ 
+   // Android never uses the libc++ headers installed alongside the toolchain,
+   // which are generally incompatible with the NDK libraries anyway.
+-  if (!getTriple().isAndroid())
+-    if (AddIncludePath(getDriver().Dir + "/../include"))
+-      return;
++  //
++  // Why the did you ignore the sysroot?!? It breaks cross-compilation!
++  //
++  //if (!getTriple().isAndroid())
++  //  if (AddIncludePath(getDriver().Dir + "/../include"))
++  //    return;
++  
+   // If this is a development, non-installed, clang, libcxx will
+   // not be found at ../include/c++ but it likely to be found at
+   // one of the following two locations:
+diff --git a/clang/lib/Driver/ToolChains/Linux.cpp b/clang/lib/Driver/ToolChains/Linux.cpp
+index c6fb290ff..cb9a20499 100644
+--- a/clang/lib/Driver/ToolChains/Linux.cpp
++++ b/clang/lib/Driver/ToolChains/Linux.cpp
+@@ -588,11 +588,15 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
+   // GCC_INCLUDE_DIR (private headers) in GCC. Note: the include directory
+   // contains some files conflicting with system /usr/include. musl systems
+   // prefer the /usr/include copies which are more relevant.
++  //
++  // It's not even funny any more. Stop ignoring sysroot - it breaks cross-compilation
++  // badly! I don't want your resourcedir in my cross-compiled environment, thank you very much!
+   SmallString<128> ResourceDirInclude(D.ResourceDir);
+   llvm::sys::path::append(ResourceDirInclude, "include");
+   if (!DriverArgs.hasArg(options::OPT_nobuiltininc) &&
+-      (!getTriple().isMusl() || DriverArgs.hasArg(options::OPT_nostdlibinc)))
+-    addSystemInclude(DriverArgs, CC1Args, ResourceDirInclude);
++      (!getTriple().isMusl() || DriverArgs.hasArg(options::OPT_nostdlibinc))
++      )
++    addSystemInclude(DriverArgs, CC1Args, concat(SysRoot, ResourceDirInclude));
+ 
+   if (DriverArgs.hasArg(options::OPT_nostdlibinc))
+     return;
+diff --git a/libunwind/src/CMakeLists.txt b/libunwind/src/CMakeLists.txt
+index df32e53d6..c1bbd3e8d 100644
+--- a/libunwind/src/CMakeLists.txt
++++ b/libunwind/src/CMakeLists.txt
+@@ -103,15 +103,6 @@ endif()
+ # MINGW_LIBRARIES is defined in config-ix.cmake
+ add_library_flags_if(MINGW "${MINGW_LIBRARIES}")
+ 
+-if (LIBUNWIND_ENABLE_SHARED AND
+-    NOT (CXX_SUPPORTS_FNO_EXCEPTIONS_FLAG AND
+-         CXX_SUPPORTS_FUNWIND_TABLES_FLAG))
+-  message(FATAL_ERROR
+-          "Compiler doesn't support generation of unwind tables if exception "
+-          "support is disabled.  Building libunwind DSO with runtime dependency "
+-          "on C++ ABI library is not supported.")
+-endif()
+-
+ if (APPLE)
+   add_compile_flags("-U__STRICT_ANSI__")
+   add_link_flags("-compatibility_version 1" "-install_name /usr/lib/libunwind.1.dylib")
+diff --git a/llvm/CMakeLists.txt b/llvm/CMakeLists.txt
+index 2b9315c22..4f3558f49 100644
+--- a/llvm/CMakeLists.txt
++++ b/llvm/CMakeLists.txt
+@@ -764,7 +764,7 @@ endif()
+ 
+ option(LLVM_OPTIMIZED_TABLEGEN "Force TableGen to be built with optimization" OFF)
+ if(CMAKE_CROSSCOMPILING OR (LLVM_OPTIMIZED_TABLEGEN AND (LLVM_ENABLE_ASSERTIONS OR CMAKE_CONFIGURATION_TYPES)))
+-  set(LLVM_USE_HOST_TOOLS ON)
++	#set(LLVM_USE_HOST_TOOLS ON)
+ endif()
+ 
+ option(LLVM_OMIT_DAGISEL_COMMENTS "Do not add comments to DAG ISel" ON)
+diff --git a/llvm/cmake/modules/CheckAtomic.cmake b/llvm/cmake/modules/CheckAtomic.cmake
+index f11cadf39..30491c195 100644
+--- a/llvm/cmake/modules/CheckAtomic.cmake
++++ b/llvm/cmake/modules/CheckAtomic.cmake
+@@ -53,7 +53,7 @@ elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL")
+       list(APPEND CMAKE_REQUIRED_LIBRARIES "atomic")
+       check_working_cxx_atomics(HAVE_CXX_ATOMICS_WITH_LIB)
+       if (NOT HAVE_CXX_ATOMICS_WITH_LIB)
+-        message(FATAL_ERROR "Host compiler must support std::atomic!")
++	      #message(FATAL_ERROR "Host compiler must support std::atomic!")
+       endif()
+     else()
+       message(FATAL_ERROR "Host compiler appears to require libatomic, but cannot find it.")
+@@ -74,7 +74,7 @@ elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL")
+       list(APPEND CMAKE_REQUIRED_LIBRARIES "atomic")
+       check_working_cxx_atomics64(HAVE_CXX_ATOMICS64_WITH_LIB)
+       if (NOT HAVE_CXX_ATOMICS64_WITH_LIB)
+-        message(FATAL_ERROR "Host compiler must support 64-bit std::atomic!")
++	      #message(FATAL_ERROR "Host compiler must support 64-bit std::atomic!")
+       endif()
+     else()
+       message(FATAL_ERROR "Host compiler appears to require libatomic for 64-bit operations, but cannot find it.")
+diff --git a/llvm/cmake/modules/CheckCompilerVersion.cmake b/llvm/cmake/modules/CheckCompilerVersion.cmake
+index 374ee8ffa..4bff0569d 100644
+--- a/llvm/cmake/modules/CheckCompilerVersion.cmake
++++ b/llvm/cmake/modules/CheckCompilerVersion.cmake
+@@ -84,9 +84,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+ int main() { return 0; }
+ "
+       LLVM_LIBSTDCXX_MIN)
+-    if(NOT LLVM_LIBSTDCXX_MIN)
+-      message(FATAL_ERROR "libstdc++ version must be at least ${GCC_MIN}.")
+-    endif()
+     check_cxx_source_compiles("
+ #include <iosfwd>
+ #if defined(__GLIBCXX__)
+diff --git a/llvm/lib/Support/Unix/Program.inc b/llvm/lib/Support/Unix/Program.inc
+index 897e22711..9e8d3ae65 100644
+--- a/llvm/lib/Support/Unix/Program.inc
++++ b/llvm/lib/Support/Unix/Program.inc
+@@ -548,7 +548,7 @@ bool llvm::sys::commandLineFitsWithinSystemLimits(StringRef Program,
+   static long ArgMax = sysconf(_SC_ARG_MAX);
+   // POSIX requires that _POSIX_ARG_MAX is 4096, which is the lowest possible
+   // value for ARG_MAX on a POSIX compliant system.
+-  static long ArgMin = _POSIX_ARG_MAX;
++  static long ArgMin = 4096 /*_POSIX_ARG_MAX*/;
+ 
+   // This the same baseline used by xargs.
+   long EffectiveArgMax = 128 * 1024;
+diff --git a/clang/include/clang/Analysis/FlowSensitive/DataflowEnvironment.h b/clang/include/clang/Analysis/FlowSensitive/DataflowEnvironment.h
+index e457430a5..daffa9d13 100644
+--- a/clang/include/clang/Analysis/FlowSensitive/DataflowEnvironment.h
++++ b/clang/include/clang/Analysis/FlowSensitive/DataflowEnvironment.h
+@@ -496,6 +496,12 @@ private:
+   AtomicBoolValue *FlowConditionToken;
+ };
+ 
++/// Returns the storage location for the base object of a `MemberExpr`, or null
++/// if none is defined in the environment. Dereferences the pointer if the
++/// member expression was written using `->`.
++AggregateStorageLocation *getBaseObjectLocation(const MemberExpr &ME,
++                                                const Environment &Env);
++
+ } // namespace dataflow
+ } // namespace clang
+ 
+diff --git a/clang/lib/Analysis/FlowSensitive/DataflowEnvironment.cpp b/clang/lib/Analysis/FlowSensitive/DataflowEnvironment.cpp
+index cc3992805..d54231eed 100644
+--- a/clang/lib/Analysis/FlowSensitive/DataflowEnvironment.cpp
++++ b/clang/lib/Analysis/FlowSensitive/DataflowEnvironment.cpp
+@@ -814,5 +814,25 @@ void Environment::dump() const {
+   dump(llvm::dbgs());
+ }
+ 
++AggregateStorageLocation *getBaseObjectLocation(const MemberExpr &ME,
++                                                const Environment &Env) {
++  Expr *Base = ME.getBase();
++  if (Base == nullptr)
++    return nullptr;
++  StorageLocation *Loc = Env.getStorageLocation(*Base, SkipPast::Reference);
++  if (Loc == nullptr)
++    return nullptr;
++  if (ME.isArrow()) {
++    if (auto *Val = cast_or_null<PointerValue>(Env.getValue(*Loc)))
++      return &cast<AggregateStorageLocation>(Val->getPointeeLoc());
++    return nullptr;
++  }
++  if (Loc->getKind() != StorageLocation::Kind::Aggregate) {
++	  return nullptr;
++  }
++  return cast<AggregateStorageLocation>(Loc);
++}
++
++
+ } // namespace dataflow
+ } // namespace clang
+diff --git a/clang/lib/Analysis/FlowSensitive/Transfer.cpp b/clang/lib/Analysis/FlowSensitive/Transfer.cpp
+index 0e6c484b6..31ddd845f 100644
+--- a/clang/lib/Analysis/FlowSensitive/Transfer.cpp
++++ b/clang/lib/Analysis/FlowSensitive/Transfer.cpp
+@@ -491,8 +491,7 @@ public:
+ 
+     // The receiver can be either a value or a pointer to a value. Skip past the
+     // indirection to handle both cases.
+-    auto *BaseLoc = cast_or_null<AggregateStorageLocation>(
+-        Env.getStorageLocation(*S->getBase(), SkipPast::ReferenceThenPointer));
++    AggregateStorageLocation *BaseLoc = getBaseObjectLocation(*S, Env);
+     if (BaseLoc == nullptr)
+       return;
+ 

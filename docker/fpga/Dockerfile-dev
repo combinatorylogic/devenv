@@ -1,0 +1,60 @@
+ARG baseversion=1.0.0
+ARG baseimage=base_devenv
+FROM ${baseimage}_fpgadev:${baseversion}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install \
+    libpcl-dev \
+    libpcap-dev \
+    libboost-system-dev \
+    libncurses-dev pax netbase doxygen bzip2 libbz2-dev \
+    libssl-dev libtinyxml-dev liburdfdom-dev \
+    libopenthreads-dev \
+    maxima wxmaxima sbcl mono-complete opam \
+    gdb joe screen less xterm wget valgrind gnuplot graphviz imagemagick mesa-utils \
+    --assume-yes --no-install-recommends  &&  rm -rf /var/lib/apt/lists/*
+
+# Anaconda 3
+RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-py311_23.5.2-0-Linux-x86_64.sh -O ~/anaconda.sh && \
+    /bin/bash ~/anaconda.sh -b -p /opt/conda && \
+    rm ~/anaconda.sh && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc
+
+ENV PATH="/opt/conda/bin:$PATH"
+
+# Setup conda-forge
+RUN . ~/.bashrc && conda activate base && conda install -y conda-build && conda config --add channels conda-forge && pip install virtualenv
+
+# Setup opam
+RUN apt-get update \
+    && apt-get install -y ocaml ocaml-tools \
+    --assume-yes &&  rm -rf /var/lib/apt/lists/*
+    
+RUN opam init -y && eval `opam config env` && opam update && opam install -y hardcaml
+
+## Setup RISC-V toolchains
+#COPY picorv32.patch /root/
+#RUN cd /root && git clone --recursive https://github.com/cliffordwolf/picorv32.git && cd /root/picorv32 && patch -p1 < /root/picorv32.patch && make download-tools
+#RUN apt-get update \
+#    && apt-get install -y autoconf automake autotools-dev curl libmpc-dev \
+#            libmpfr-dev libgmp-dev gawk build-essential bison flex texinfo \
+#            gperf libtool patchutils bc zlib1g-dev git libexpat1-dev \
+#    --assume-yes &&  rm -rf /var/lib/apt/lists/*
+#RUN cd /root/picorv32 && make build-tools && git clean -fdx
+
+
+## RV-64 toolchain:
+RUN cd /root && wget https://static.dev.sifive.com/dev-tools/riscv64-unknown-elf-gcc-8.1.0-2019.01.0-x86_64-linux-ubuntu14.tar.gz \
+ && cd /opt && tar -xvf /root/riscv64-unknown-elf-gcc-8.1.0-2019.01.0-x86_64-linux-ubuntu14.tar.gz \
+ && rm -rf /root/riscv64-unknown-elf-gcc-8.1.0-2019.01.0-x86_64-linux-ubuntu14.tar.gz
+
+ENV PATH="$PATH:/opt/riscv64-unknown-elf-gcc-8.1.0-2019.01.0-x86_64-linux-ubuntu14/bin/"
+
+## LiteX setup:
+RUN cd /root && wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py && chmod +x litex_setup.py \
+ && ./litex_setup.py init \
+ && ./litex_setup.py install

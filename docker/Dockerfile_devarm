@@ -1,0 +1,7 @@
+## Arm toolchain layer
+ARG BASEIMAGE=nvidia/opengl:1.2-glvnd-runtime-ubuntu20.04
+FROM ${BASEIMAGE}
+
+ADD chroot-aarch64.tar.gz /
+
+COPY in_chroot.sh /root/.bashrc

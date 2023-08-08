@@ -1,0 +1,156 @@
+###
+### The base image, containing a custom built Clang toolchain. It's based off
+### nvidia/opengl:1.2-glvnd-runtime-ubuntu20.04, to make it easier to use OpenGL/Vulkan/CUDA/etc.
+###  from inside the image on NVidia GPUs, while all the other GPUs will work just fine anyway.
+###
+
+
+
+ARG LLVM_VERSION=16.0.6
+ARG LLVM_VERSION_BRANCH=llvmorg-16.0.6
+ARG CMAKE_VERSION=3.27.1
+ARG CMAKE_URL=https://github.com/Kitware/CMake/releases/download/v3.27.1/cmake-3.27.1.tar.gz
+
+###
+### Build stage - it'll produce the binary tarball of llvm-16.0.6 build and will be discarded afterwards.
+###
+FROM nvidia/opengl:1.2-glvnd-runtime-ubuntu20.04 as build-stage
+
+### The following copies the arguments into this stage
+
+ARG LLVM_VERSION
+ARG LLVM_VERSION_BRANCH
+ARG CMAKE_VERSION
+ARG CMAKE_URL
+
+### Prerequisites for building LLVM
+
+RUN apt-get update &&\
+    apt-get install -y apt-transport-https ca-certificates curl \
+    software-properties-common ccache && \
+    add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
+    add-apt-repository ppa:git-core/ppa -y && \
+    apt-get install -y  git git-lfs software-properties-common wget \
+        apt-utils libpcap-dev libtinfo5 libncurses-dev pax \
+        netbase doxygen bzip2 libbz2-dev libssl-dev  libopenthreads-dev libopenblas-dev \
+        g++-11 ninja-build  && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV HOME /root
+
+### Get a more up to date CMake
+
+RUN cd /root && wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
+     gpg --dearmor - |  tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
+RUN apt-add-repository -y 'deb https://apt.kitware.com/ubuntu/ focal main' && apt-get update && \
+    apt-get install -y cmake && apt-get clean &&  rm -rf /var/lib/apt/lists/*
+
+### Install the bootstrap LLVM toolchain
+
+RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+RUN echo "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-16 main" >> /etc/apt/sources.list
+RUN apt-get update && apt-get install -y libc++1-16 libc++-16-dev clang-16 lld-16 libc++abi-16-dev \
+    libunwind-16-dev && apt-get clean &&  rm -rf /var/lib/apt/lists/*
+
+
+### Make sure we're using llvm toolchain instead of default binutils
+RUN    update-alternatives --install /usr/bin/gcc gcc /usr/bin/clang-16 40 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 40 \
+    && update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.lld-16" 20 \
+    && update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.gold" 10 \
+    && update-alternatives --config ld \
+    && update-alternatives --install "/usr/bin/ar" "ar" "/usr/bin/llvm-ar-16" 20 \
+    && update-alternatives --config ar \
+    && update-alternatives --install "/usr/bin/ranlib" "ranlib" "/usr/bin/llvm-ranlib-16" 20 \
+    && update-alternatives --config ranlib
+
+
+### We'll be building Clang with libc++ to avoid having a dependency on libstdc++
+ENV CC="clang"
+ENV CXX="clang++ -stdlib=libc++"
+
+
+### There's a few issues in llvm 16.0.6 that need to be addressed when we'll use this toolchain for
+### building the aarch64 cross-environment. Also, some bugfixes that are hard to get into llvm upstream.
+COPY llvm-16.0.6.patch /root/llvm.patch
+
+### Fetch the shallow copy of a requested LLVM tag and build everything.
+RUN cd /root \
+  && mkdir llvm-project && cd /root/llvm-project && git init . && git remote add origin https://github.com/llvm/llvm-project.git \
+  && git fetch --depth 1 origin ${LLVM_VERSION_BRANCH} && git checkout FETCH_HEAD \
+  && patch -p1 < /root/llvm.patch \
+  && mkdir /root/llvm-build && cd /root/llvm-build \
+  && CC=clang-16 CXX="clang++-16 -stdlib=libc++" cmake -GNinja -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra;lldb;lld;polly" -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind;compiler-rt" -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=0  -DLLVM_PARALLEL_LINK_JOBS=4 ../llvm-project/llvm/ \
+  && LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH DESTDIR=/opt/clang-tmp/ ninja install/strip \
+  && rm -rf /root/llvm-build && rm -rf /root/llvm-project && rm -rf /opt/clang-tmp/lib/libLLVM*.a /opt/clang-tmp/lib/libClang*.a
+
+
+### Export the build artifacts of this stage, we won't need anything else.
+RUN  cd /opt/clang-tmp \
+  && tar -cvvzf /root/clang-${LLVM_VERSION}-1.tar.gz .
+
+###
+### Export stage - this will go into the resulting Docker image
+###
+FROM nvidia/opengl:1.2-glvnd-runtime-ubuntu20.04 as export-stage
+
+### Again, copy the arguments into the stage
+ARG LLVM_VERSION
+ARG LLVM_VERSION_BRANCH
+ARG CMAKE_VERSION
+ARG CMAKE_URL
+
+
+### Install some essentials we'll need in the cross-toolchain build
+RUN apt-get update && \
+    apt-get install -y apt-transport-https ca-certificates curl \
+         software-properties-common &&\
+    add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
+    add-apt-repository ppa:git-core/ppa -y && \
+    apt-get install -y wget net-tools curl bash git git-lfs ruby-dev build-essential \
+       python3-pip autoconf libtool ninja-build iproute2 can-utils jq binfmt-support \
+       qemu-user-static qemu-system-arm qemu \
+       libmpfr-dev libmpc-dev libgmp-dev \
+       libisl-dev libasound2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+       libgstreamer-plugins-good1.0-dev libgstreamer-plugins-bad1.0-dev \
+       freeglut3-dev \
+       g++-11 iproute2 vim tmux screen \
+       software-properties-common wget \
+       sudo apt-utils curl libpcap-dev libtinfo5 libncurses-dev \
+       pax netbase doxygen bzip2 libbz2-dev libssl-dev  libopenthreads-dev libopenblas-dev && \
+    apt-get purge -y gcc-13 libgcc-13-dev cpp-13 && \
+    git lfs install --skip-repo && apt-get clean && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* 
+
+ENV HOME /root
+
+### Transfer the llvm-16.0.6 binaries constructed in the build stage.
+RUN --mount=type=bind,from=build-stage,source=/root/clang-${LLVM_VERSION}-1.tar.gz,target=/root/clang.tar.gz \
+    (cd / && tar -xf /root/clang.tar.gz)
+
+
+### Make sure we're using this toolchain from now on    
+ENV CC "clang"
+ENV CXX "clang++ -stdlib=libc++"
+
+RUN    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 40 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 40 \
+    && update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.lld" 20 \
+    && update-alternatives --config ld \
+    && update-alternatives --config gcc \
+    && update-alternatives --config g++ \
+    && update-alternatives --install "/usr/bin/ar" "ar" "/usr/bin/llvm-ar" 20 \
+    && update-alternatives --config ar \
+    && update-alternatives --install "/usr/bin/ranlib" "ranlib" "/usr/bin/llvm-ranlib" 20 \
+    && update-alternatives --config ranlib
+    
+ENV LD_LIBRARY_PATH /usr/lib/x86_64-unknown-linux-gnu/:/usr/lib/x86_64-linux-gnu:/usr/lib/i386-linux-gnu:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
+# Build CMake from source (unlike the one we used in the build stage)
+RUN cd /root && wget --quiet ${CMAKE_URL} &&\
+    tar -xf cmake-${CMAKE_VERSION}.tar.gz &&\
+    rm -rf /root/cmake-${CMAKE_VERSION}.tar.gz && \
+    cd /root/cmake-${CMAKE_VERSION} && \
+    ./bootstrap --parallel=12 && make -j12 install &&\
+    cd /root && rm -rf /root/cmake-${CMAKE_VERSION}
+
