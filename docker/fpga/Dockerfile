@@ -20,24 +20,31 @@ WORKDIR /root
 RUN apt-get update && apt-get install -y wget pkg-config zlib1g-dev llvm-dev  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Builds icestorm
-RUN cd /root; git clone --recursive https://github.com/cliffordwolf/icestorm.git && \
-    cd /root/icestorm && git checkout 0ec00d892a91cc68e45479b46161f649caea2933 && make -j16 install && cd /root && rm -rf icestorm
+RUN cd /root; git clone --recursive https://github.com/YosysHQ/icestorm.git && \
+    cd /root/icestorm && git checkout d20a5e9 && make -j16 install && cd /root && rm -rf icestorm
 
 # Build Yosys
+COPY yosys.patch /root/yosys.patch
 RUN cd /root; git clone --recursive https://github.com/YosysHQ/yosys.git && \
-    cd /root/yosys && git checkout 84e9fa764803e93c59aff9f10bcc1a5ae2f9f120 && git submodule update --init --recursive && make -j16 install && cd /root && rm -rf yosys
+    cd /root/yosys && git checkout 389b8d0 && git submodule update --init --recursive && \
+    patch -p1 < /root/yosys.patch && \
+    LD="clang++ -stdlib=libc++" CXXSTD="c++11" CC="clang" CXX="clang++ -stdlib=libc++ -std=c++11" make -j16 install && cd /root && rm -rf yosys
 
 
 # Build Trellis
-RUN cd /root; git clone https://github.com/SymbiFlow/prjtrellis.git && cd /root/prjtrellis \
-        && git checkout f93243b000c52b755c70829768d2ae6bcf7bb91a && git submodule update --init --recursive \
+# at the moment building with libstdc++, TODO: build libc++ boost first
+RUN cd /root; git clone https://github.com/YosysHQ/prjtrellis.git && cd /root/prjtrellis \
+        && git checkout f1e5710 && git submodule update --init --recursive \
         && mkdir -p build && cd build \
-        && cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../libtrellis/ \
-        && make -j16 install && cd /root && rm -rf prjtrellis
+        && CC=clang CXX=clang++ cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../libtrellis/ \
+        && CC=clang CXX=clang++ make -j16 install && cd /root && rm -rf prjtrellis
+
+ENV CC=clang
+ENV CXX=clang++
 
 # Build nextpnr-ice40 and nextpnr-ecp5
 RUN cd /root; git clone --recursive https://github.com/YosysHQ/nextpnr.git && \
-    cd /root/nextpnr && git checkout 576baa994f4b9e1746a231469bfd9e65d1d5a2b4 && \
+    cd /root/nextpnr && git checkout nextpnr-0.6 && \
         mkdir build-ice40 && cd build-ice40 && cmake -DARCH=ice40 ..  && make -j16 install \
         && cd /root/nextpnr && mkdir build-ecp5 && cd build-ecp5 && cmake  -DARCH=ecp5 -DCMAKE_INSTALL_PREFIX=/usr/local -DTRELLIS_ROOT=/usr/local/share/trellis .. && make -j16 install \
         && cd /root && rm -rf nextpnr
@@ -65,12 +72,15 @@ RUN cd /root; git clone --recursive https://github.com/SRI-CSL/yices2.git && \
 
 # Build boolector
 RUN apt-get update && apt-get install -y curl mercurial && apt-get clean && rm -rf /var/lib/apt/lists/*
-RUN cd /root && git clone --recursive https://github.com/Boolector/boolector.git && cd /root/boolector && git checkout 1cff6b0bff8a6c783790c864b0b2cafbcaf8302e \
-        && ./contrib/setup-lingeling.sh && ./contrib/setup-btor2tools.sh && ./configure.sh --prefix /usr/local && cd build && make -j16 && make -j16 install
+RUN cd /root && git clone --recursive https://github.com/Boolector/boolector.git && cd /root/boolector && git checkout 13a8a06d561041cafcaf5458e404c1ec354b2841 \
+        && ./contrib/setup-lingeling.sh && ./contrib/setup-btor2tools.sh && ./configure.sh --prefix /usr/local && cd build && make -j16 install
 
 # Build super_prove
 COPY suprove /usr/local/bin/
-RUN cd /root && git clone --recursive https://github.com/sterin/super-prove-build.git super_prove_build && cd /root/super_prove_build/ && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local .. && make -j16 install && cd /root && rm -rf super_prove_build
+RUN apt-get update && apt-get install -y libpython2.7-dev && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN cd /root && git clone --recursive https://github.com/sterin/super-prove-build.git super_prove_build && \
+    cd /root/super_prove_build && git checkout hwmcc17_final && git submodule update --init --recursive && \
+    cd /root/super_prove_build/ && mkdir build && cd build && CC=gcc-9 CXX="g++-9 -std=c++98" cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local .. && make -j16 install && cd /root && rm -rf super_prove_build
 
 # Build https://github.com/YosysHQ/SymbiYosys.git
 RUN cd /root && git clone --recursive https://github.com/YosysHQ/SymbiYosys.git && \

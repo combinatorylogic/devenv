@@ -5,7 +5,7 @@ FROM ${baseimage}_fpgaenv:${baseversion}
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
-    && apt-get install -y scala ngspice easyspice tclspice gwave gspiceui texlive-latex-extra texlive-pstricks texlive-science texlive-formats-extra \
+    && apt-get install -y scala  gwave texlive-latex-extra texlive-pstricks texlive-science texlive-formats-extra \
     racket guile-2.0 octave axiom gforth leiningen clojure haskell-platform cernlib paw++ paw-demos \
     libevent-dev  libtool automake pkg-config libusb-1.0-0-dev device-tree-compiler \
     --assume-yes \
@@ -19,14 +19,12 @@ RUN apt-get update \
 RUN apt-get update \
     && apt-get install -y bubblewrap libzmq3-dev libcairo2-dev &&  rm -rf /var/lib/apt/lists/*
 RUN cd /root && wget https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh && (echo "/usr/bin/" | bash /root/install.sh --fresh)
-RUN rm -rf $HOME/.opam && opam init -a -y --bare --disable-sandboxing && eval "$(opam config env)" ; opam switch create 4.07.1 ; opam update -y ; opam upgrade -y
+RUN rm -rf $HOME/.opam && opam init -a -y --bare --disable-sandboxing && eval "$(opam config env)" ; opam switch create 5.0.0 ; opam update -y ; opam upgrade -y
 RUN eval "$(opam config env)" \
  && opam install -y coq \
- && opam install -y jupyter \
- && opam install -y jupyter-archimedes \
  && opam install -y hardcaml
-RUN eval "$(opam config env)" && ocaml-jupyter-opam-genspec \
- && jupyter kernelspec install --name ocaml-jupyter "$(opam config var share)/jupyter"
+#RUN eval "$(opam config env)" && ocaml-jupyter-opam-genspec \
+# && jupyter kernelspec install --name ocaml-jupyter "$(opam config var share)/jupyter"
 
 RUN tail -n 2 /root/.profile >> /root/.bashrc
 

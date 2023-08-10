@@ -10,20 +10,23 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 10
 
 # Build Mesa
 WORKDIR /root
-RUN apt-get update && apt-get install -y wget pkg-config zlib1g-dev llvm-dev  && apt-get clean && rm -rf /var/lib/apt/lists/*
-RUN cd /root && wget https://mesa.freedesktop.org/archive/mesa-18.2.4.tar.xz \
-    && tar xf mesa-18.2.4.tar.xz && mkdir mesa-18.2.4/build \
-    && cd /root/mesa-18.2.4/build \
-    && ../configure --disable-dri \
-               --disable-egl \
-               --disable-gbm \
-               --with-gallium-drivers=swrast,swr \
-               --with-platforms=x11 \
-               --prefix=/usr/local \
-               --enable-gallium-osmesa \
-               --disable-xvmc --disable-vdpau --disable-va \
-               --with-swr-archs=avx \
-   && make -j 8 && make install && cd /root && rm -rf mesa-18.2.4
+
+
+RUN apt-get update && apt-get install -y wget pkg-config zlib1g-dev libxcb-xfixes0-dev libxcb-dri2-0-dev glslang-dev glslang-tools libxcb-randr0-dev libxcb-dri3-dev libxcb-present-dev libxshmfence-dev libxrandr-dev meson && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN cd /root/ && wget https://dri.freedesktop.org/libdrm/libdrm-2.4.115.tar.xz && \
+    tar -xf libdrm-2.4.115.tar.xz && \
+    cd libdrm-2.4.115 && \
+    meson builddir && \
+    cd builddir && ninja -j16 install \
+    && cd /root && rm -rf libdrm-2.4.115*
+RUN pip3 install mako
+RUN cd /root && wget https://mesa.freedesktop.org/archive/mesa-22.3.2.tar.xz \
+    && tar xf mesa-22.3.2.tar.xz && mkdir mesa-22.3.2/build \
+    && cd /root/mesa-22.3.2/build \
+    && meson .. -Dgallium-drivers=swrast -Dplatforms=x11 -Dgbm=disabled -Degl=disabled -Dosmesa=true -Dglx=xlib -Degl-native-platform=x11 -Dvulkan-drivers=swrast \
+    && ninja -j16 install \
+    && cd /root && rm -rf mesa-22.3.2*
+
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
 ENV LIBGL_ALWAYS_SOFTWARE="1" \

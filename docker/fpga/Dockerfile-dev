@@ -34,8 +34,6 @@ RUN apt-get update \
     && apt-get install -y ocaml ocaml-tools \
     --assume-yes &&  rm -rf /var/lib/apt/lists/*
     
-RUN opam init -y && eval `opam config env` && opam update && opam install -y hardcaml
-
 ## Setup RISC-V toolchains
 #COPY picorv32.patch /root/
 #RUN cd /root && git clone --recursive https://github.com/cliffordwolf/picorv32.git && cd /root/picorv32 && patch -p1 < /root/picorv32.patch && make download-tools
