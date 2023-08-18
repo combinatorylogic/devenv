@@ -184,6 +184,8 @@
     (which-key-mode)
     (add-hook 'c-mode-hook 'lsp)
     (add-hook 'c++-mode-hook 'lsp)
+    (add-hook 'c-ts-mode-hook 'lsp)
+    (add-hook 'c++-ts-mode-hook 'lsp)
     
     (setq gc-cons-threshold (* 100 1024 1024)
           read-process-output-max (* 1024 1024)
